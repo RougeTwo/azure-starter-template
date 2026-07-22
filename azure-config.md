@@ -1,7 +1,5 @@
-# Azure Configuration
+# Azure Configuration for: engops
 
-Resource Group: MyTestResourceGroup
-Location: southafricanorth
-
-Command:
-az configure --defaults group=MyTestResourceGroup location=southafricanorth
+- **Resource Group**: enginelogdata
+- **Location**: southafricanorth
+- **Storage Account**: storeblz83n

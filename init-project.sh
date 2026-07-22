@@ -1,17 +1,11 @@
-cd ~/my-projects/my-new-azure-project || exit
-
-cat > init-project.sh << 'EOF'
 #!/bin/bash
-
+# shellcheck shell=bash
 # ============================================
 # Azure Project Setup Script (Interactive + CLI + Auto-Deploy)
 # ============================================
 
 set -e
 
-# -------------------------------
-# 1. Parse command-line arguments
-# -------------------------------
 PROJECT_NAME=""
 RG_NAME="MyTestResourceGroup"
 LOCATION="southafricanorth"
@@ -32,6 +26,10 @@ while getopts "n:r:l:s:h" opt; do
       echo "  -h             Show this help"
       exit 0
       ;;
+    \?)
+      echo "Invalid option: -$OPTARG" >&2
+      exit 1
+      ;;
   esac
 done
 
@@ -46,15 +44,12 @@ echo "   Welcome to your Azure Project Setup"
 echo "=================================================="
 echo ""
 
-# ---------------------------------------
-# 2. Collect user input
-# ---------------------------------------
 if [ $AUTO_MODE -eq 1 ] && [ -n "$PROJECT_NAME" ]; then
   echo "Using project name: $PROJECT_NAME"
 else
   echo "Step 1: Project Name"
   echo "--------------------"
-  read -p "Enter project name (e.g., data-pipeline): " input_name
+  read -r -p "Enter project name (e.g., data-pipeline): " input_name
   PROJECT_NAME=${input_name:-"my-azure-project"}
 fi
 
@@ -64,7 +59,7 @@ else
   echo ""
   echo "Step 2: Azure Resource Group"
   echo "----------------------------"
-  read -p "Enter Resource Group name (default: MyTestResourceGroup): " input_rg
+  read -r -p "Enter Resource Group name (default: MyTestResourceGroup): " input_rg
   RG_NAME=${input_rg:-"MyTestResourceGroup"}
 fi
 
@@ -74,7 +69,7 @@ else
   echo ""
   echo "Step 3: Azure Region (Location)"
   echo "-------------------------------"
-  read -p "Enter location (default: southafricanorth): " input_loc
+  read -r -p "Enter location (default: southafricanorth): " input_loc
   LOCATION=${input_loc:-"southafricanorth"}
 fi
 
@@ -87,13 +82,11 @@ else
   RANDOM_SUFFIX=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
   SUGGESTED="store${RANDOM_SUFFIX}"
   echo "Suggested name: $SUGGESTED"
-  read -p "Enter storage account name (press Enter to accept suggestion): " input_storage
+  read -r -p "Enter storage account name (press Enter to accept suggestion): " input_storage
   STORAGE_NAME=${input_storage:-$SUGGESTED}
+  STORAGE_NAME=$(echo "$STORAGE_NAME" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
 fi
 
-# ---------------------------------------
-# 3. Summary
-# ---------------------------------------
 echo ""
 echo "=================================================="
 echo "              PROJECT SUMMARY"
@@ -105,16 +98,13 @@ echo "Storage Account   : $STORAGE_NAME"
 echo "=================================================="
 
 if [ $AUTO_MODE -eq 0 ]; then
-  read -p "Does this look correct? (y/n): " CONFIRM
+  read -r -p "Does this look correct? (y/n): " CONFIRM
   if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo "Setup cancelled."
     exit 1
   fi
 fi
 
-# ---------------------------------------
-# 4. Save config
-# ---------------------------------------
 echo ""
 echo "Saving configuration..."
 cat > azure-config.json << CONF_EOF
@@ -136,14 +126,11 @@ MD_EOF
 
 echo "✅ Configuration saved."
 
-# ---------------------------------------
-# 5. Check Azure login
-# ---------------------------------------
 echo ""
 echo "Checking Azure login status..."
 if ! az account show &>/dev/null; then
   echo "❌ Not logged in."
-  read -p "Log in now? (y/n): " login_now
+  read -r -p "Log in now? (y/n): " login_now
   if [[ "$login_now" =~ ^[Yy]$ ]]; then
     az login
   else
@@ -153,13 +140,10 @@ else
   echo "✅ Already logged in."
 fi
 
-# ---------------------------------------
-# 6. Create resource group if it doesn't exist
-# ---------------------------------------
 if ! az group show --name "$RG_NAME" &>/dev/null; then
   echo ""
   echo "⚠️ Resource group '$RG_NAME' does not exist."
-  read -p "Create it now? (y/n): " create_rg
+  read -r -p "Create it now? (y/n): " create_rg
   if [[ "$create_rg" =~ ^[Yy]$ ]]; then
     echo "Creating resource group..."
     az group create --name "$RG_NAME" --location "$LOCATION"
@@ -172,19 +156,13 @@ else
   echo "✅ Resource group '$RG_NAME' exists."
 fi
 
-# ---------------------------------------
-# 7. Ask to deploy
-# ---------------------------------------
 echo ""
-read -p "Do you want to deploy resources to Azure NOW? (y/n): " DEPLOY_NOW
+read -r -p "Do you want to deploy resources to Azure NOW? (y/n): " DEPLOY_NOW
 if [[ ! "$DEPLOY_NOW" =~ ^[Yy]$ ]]; then
   echo "Skipping deployment."
   exit 0
 fi
 
-# ---------------------------------------
-# 8. Resource selection
-# ---------------------------------------
 echo ""
 echo "Select resources to deploy (space-separated numbers):"
 echo "  1) Storage Account   (templates/storage-account.json)"
@@ -192,15 +170,20 @@ echo "  2) Virtual Network   (templates/virtual-network.json)"
 echo "  3) Web App + App Plan (templates/app-service.json)"
 echo "  4) Deploy ALL resources"
 echo "  0) Skip deployment"
-read -p "Enter choice(s) (e.g., '1 2' or '4'): " -a CHOICES
+read -r -p "Enter choice(s) (e.g., '1 2' or '4'): " -a CHOICES
 
-if [[ " ${CHOICES[@]} " =~ " 4 " ]]; then
+found_all=0
+for c in "${CHOICES[@]}"; do
+  if [[ "$c" == "4" ]]; then
+    found_all=1
+    break
+  fi
+done
+
+if [[ $found_all -eq 1 ]]; then
   CHOICES=(1 2 3)
 fi
 
-# ---------------------------------------
-# 9. Deploy
-# ---------------------------------------
 echo ""
 echo "🚀 Starting deployment(s)..."
 az configure --defaults group="$RG_NAME" location="$LOCATION"
@@ -224,6 +207,7 @@ for choice in "${CHOICES[@]}"; do
     3)
       echo "Deploying Web App + App Plan..."
       UNIQUE_WEBAPP="${PROJECT_NAME//-}web$(date +%s | tail -c 6)"
+      UNIQUE_WEBAPP=$(echo "$UNIQUE_WEBAPP" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]//g')
       az deployment group create \
         --resource-group "$RG_NAME" \
         --template-file templates/app-service.json \
@@ -240,6 +224,3 @@ done
 
 echo ""
 echo "✅ All selected deployments completed!"
-EOF
-
-chmod +x init-project.sh
