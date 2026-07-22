@@ -1,64 +1,98 @@
+cd ~/my-projects/my-new-azure-project || exit
+
+cat > init-project.sh << 'EOF'
 #!/bin/bash
 
 # ============================================
-# Azure Project Setup Script
+# Azure Project Setup Script (Interactive + Auto-Deploy)
 # ============================================
+
+# Default values
+PROJECT_NAME=""
+RG_NAME="MyTestResourceGroup"
+LOCATION="southafricanorth"
+STORAGE_NAME=""
+
+# Parse command-line arguments (for future use)
+while getopts "n:r:l:s:h" opt; do
+  case $opt in
+    n) PROJECT_NAME="$OPTARG" ;;
+    r) RG_NAME="$OPTARG" ;;
+    l) LOCATION="$OPTARG" ;;
+    s) STORAGE_NAME="$OPTARG" ;;
+    h)
+      echo "Usage: ./init-project.sh [options]"
+      echo "  -n <name>      Project name"
+      echo "  -r <rg>        Resource Group (default: MyTestResourceGroup)"
+      echo "  -l <location>  Azure region (default: southafricanorth)"
+      echo "  -s <storage>   Storage account name (auto-generates if omitted)"
+      echo "  -h             Show this help"
+      exit 0
+      ;;
+  esac
+done
+
+# If arguments are provided, run in AUTO mode (skip questions)
+if [ -n "$PROJECT_NAME" ] || [ -n "$STORAGE_NAME" ]; then
+  AUTO_MODE=1
+else
+  AUTO_MODE=0
+fi
 
 echo "=================================================="
 echo "   Welcome to your Azure Project Setup"
 echo "=================================================="
 echo ""
-echo "This script will guide you through setting up"
-echo "your new Azure project step by step."
-echo ""
 
 # --- Step 1: Project Name ---
-echo "Step 1: Project Name"
-echo "--------------------"
-echo "This is just a label for your project folder"
-echo "and helps you identify it later."
-read -p "Enter project name (e.g., data-pipeline): " PROJECT_NAME
-if [ -z "$PROJECT_NAME" ]; then
-    PROJECT_NAME="my-azure-project"
-    echo "Using default: $PROJECT_NAME"
+if [ $AUTO_MODE -eq 1 ] && [ -n "$PROJECT_NAME" ]; then
+  echo "Using project name: $PROJECT_NAME"
+else
+  echo "Step 1: Project Name"
+  echo "--------------------"
+  echo "This is just a label for your project folder."
+  read -p "Enter project name (e.g., data-pipeline): " PROJECT_NAME
+  PROJECT_NAME=${PROJECT_NAME:-"my-azure-project"}
 fi
-echo ""
 
 # --- Step 2: Resource Group ---
-echo "Step 2: Azure Resource Group"
-echo "----------------------------"
-echo "A Resource Group is like a folder that holds"
-echo "all your Azure resources (storage, VMs, etc.)."
-echo "If you want to use an existing one, type its name."
-read -p "Enter Resource Group name (default: MyTestResourceGroup): " RG_NAME
-RG_NAME=${RG_NAME:-MyTestResourceGroup}
-echo "Using: $RG_NAME"
-echo ""
+if [ $AUTO_MODE -eq 1 ] && [ -n "$RG_NAME" ]; then
+  echo "Using Resource Group: $RG_NAME"
+else
+  echo ""
+  echo "Step 2: Azure Resource Group"
+  echo "----------------------------"
+  read -p "Enter Resource Group name (default: MyTestResourceGroup): " input_rg
+  RG_NAME=${input_rg:-"MyTestResourceGroup"}
+fi
 
-# --- Step 3: Location (Region) ---
-echo "Step 3: Azure Region (Location)"
-echo "-------------------------------"
-echo "This is where your resources will be physically hosted."
-echo "Common options: southafricanorth, eastus, westeurope, uksouth"
-read -p "Enter location (default: southafricanorth): " LOCATION
-LOCATION=${LOCATION:-southafricanorth}
-echo "Using: $LOCATION"
-echo ""
+# --- Step 3: Location ---
+if [ $AUTO_MODE -eq 1 ] && [ -n "$LOCATION" ]; then
+  echo "Using location: $LOCATION"
+else
+  echo ""
+  echo "Step 3: Azure Region (Location)"
+  echo "-------------------------------"
+  read -p "Enter location (default: southafricanorth): " input_loc
+  LOCATION=${input_loc:-"southafricanorth"}
+fi
 
-# --- Step 4: Storage Account Name (Auto-generate) ---
-echo "Step 4: Storage Account Name"
-echo "----------------------------"
-echo "Storage account names must be globally unique across Azure."
-echo "We will generate a random name for you, but you can change it."
-RANDOM_SUFFIX=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
-DEFAULT_STORAGE="store${RANDOM_SUFFIX}"
-echo "Suggested name: $DEFAULT_STORAGE"
-read -p "Enter storage account name (press Enter to accept suggestion): " STORAGE_NAME
-STORAGE_NAME=${STORAGE_NAME:-$DEFAULT_STORAGE}
-echo "Using: $STORAGE_NAME"
-echo ""
+# --- Step 4: Storage Account Name ---
+if [ $AUTO_MODE -eq 1 ] && [ -n "$STORAGE_NAME" ]; then
+  echo "Using storage name: $STORAGE_NAME"
+else
+  echo ""
+  echo "Step 4: Storage Account Name"
+  echo "----------------------------"
+  RANDOM_SUFFIX=$(cat /dev/urandom | tr -dc 'a-z0-9' | fold -w 6 | head -n 1)
+  SUGGESTED="store${RANDOM_SUFFIX}"
+  echo "Suggested name: $SUGGESTED"
+  read -p "Enter storage account name (press Enter to accept suggestion): " input_storage
+  STORAGE_NAME=${input_storage:-$SUGGESTED}
+fi
 
-# --- Step 5: Summary ---
+# --- Step 5: Summary & Confirmation (skip if auto) ---
+echo ""
 echo "=================================================="
 echo "              PROJECT SUMMARY"
 echo "=================================================="
@@ -67,13 +101,19 @@ echo "Resource Group    : $RG_NAME"
 echo "Location          : $LOCATION"
 echo "Storage Account   : $STORAGE_NAME"
 echo "=================================================="
-read -p "Does this look correct? (y/n): " CONFIRM
-if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
+
+if [ $AUTO_MODE -eq 0 ]; then
+  read -p "Does this look correct? (y/n): " CONFIRM
+  if [[ ! "$CONFIRM" =~ ^[Yy]$ ]]; then
     echo "Setup cancelled. Run the script again."
     exit 1
+  fi
+else
+  echo "Auto-mode: Skipping confirmation."
 fi
 
 # --- Step 6: Save Configuration ---
+echo ""
 echo "Saving configuration..."
 cat > azure-config.json << CONF_EOF
 {
@@ -84,29 +124,50 @@ cat > azure-config.json << CONF_EOF
 }
 CONF_EOF
 
-# Update the azure-config.md with the user's values
 cat > azure-config.md << MD_EOF
 # Azure Configuration for: $PROJECT_NAME
 
 - **Resource Group**: $RG_NAME
 - **Location**: $LOCATION
 - **Storage Account**: $STORAGE_NAME
-
-## Quick Commands
-\`\`\`bash
-az configure --defaults group=$RG_NAME location=$LOCATION
-az deployment group create --resource-group $RG_NAME --template-file templates/storage-account.json --parameters storageAccountName=$STORAGE_NAME
-\`\`\`
 MD_EOF
 
 echo ""
-echo "✅ Setup complete!"
-echo "Your configuration has been saved to:"
-echo "  - azure-config.json"
-echo "  - azure-config.md"
+echo "✅ Setup complete! Configuration saved."
+
+# --- Step 7: ASK TO DEPLOY AUTOMATICALLY (THIS FIXES YOUR CONCERN!) ---
 echo ""
-echo "Next steps:"
-echo "  1. Login to Azure:     az login"
-echo "  2. Set defaults:       az configure --defaults group=$RG_NAME location=$LOCATION"
-echo "  3. Deploy template:    az deployment group create --resource-group $RG_NAME --template-file templates/storage-account.json --parameters storageAccountName=$STORAGE_NAME"
+read -p "Do you want to deploy the storage account to Azure NOW? (y/n): " DEPLOY_NOW
+
+if [[ "$DEPLOY_NOW" =~ ^[Yy]$ ]]; then
+  echo ""
+  echo "🚀 Deploying your storage account..."
+  echo "Setting defaults..."
+  az configure --defaults group=$RG_NAME location=$LOCATION
+
+  echo "Running deployment..."
+  az deployment group create \
+    --resource-group $RG_NAME \
+    --template-file templates/storage-account.json \
+    --parameters storageAccountName=$STORAGE_NAME
+
+  if [ $? -eq 0 ]; then
+    echo ""
+    echo "✅ Deployment SUCCEEDED!"
+    echo "Your storage account '$STORAGE_NAME' is now live in Azure."
+    echo "View it in the portal: https://portal.azure.com/#resource/subscriptions/$(az account show --query id -o tsv)/resourceGroups/$RG_NAME/providers/Microsoft.Storage/storageAccounts/$STORAGE_NAME"
+  else
+    echo ""
+    echo "❌ Deployment failed. Please check the error messages above."
+  fi
+else
+  echo ""
+  echo "Skipping deployment. You can deploy later using:"
+  echo "az deployment group create --resource-group $RG_NAME --template-file templates/storage-account.json --parameters storageAccountName=$STORAGE_NAME"
+fi
+
 echo ""
+echo "All done! Happy coding 🚀"
+EOF
+
+chmod +x init-project.sh
